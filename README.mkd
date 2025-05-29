@@ -1,17 +1,64 @@
 # waybackurls
 
-Accept line-delimited domains on stdin, fetch known URLs from the Wayback Machine for `*.domain` and output them on stdout.
+`waybackurls` is a powerful tool that accepts line-delimited domains or URLs on stdin (or a single domain/URL as an argument) and fetches known URLs from various archive sources. It supports fetching URLs from the Wayback Machine, Common Crawl, and VirusTotal, providing comprehensive historical data. The tool outputs the collected URLs to stdout or a specified file.
 
-Usage example:
+## Usage
 
+Accepts line-delimited domains/URLs on stdin or a single domain/URL as an argument.
+
+```bash
+# Fetch URLs for domains from a file and output to another file
+▶ cat domains.txt | waybackurls -output urls.txt
+
+# Fetch URLs for a single domain and print to stdout
+▶ waybackurls example.com
+
+# Fetch URLs from specific sources (e.g., only Wayback Machine and Common Crawl)
+▶ echo example.com | waybackurls -sources wayback,commoncrawl
+
+# Fetch URLs with dates and increased concurrency
+▶ echo example.com | waybackurls -dates -concurrency 10
+
+# List crawled versions of a specific URL
+▶ waybackurls -get-versions https://example.com/path/to/page
 ```
-▶ cat domains.txt | waybackurls > urls
+
+## Flags
+
+*   `-dates`: Show the date of fetch in the first column (e.g., `2006-01-02T15:04:05Z http://example.com/path`).
+*   `-no-subs`: Do not include subdomains of the target domain.
+*   `-get-versions`: List URLs for crawled versions of the input URL(s). This mode bypasses other fetching and only works with single URLs, not domains.
+*   `-sources <list>`: A comma-separated list of sources to query. Available sources: `wayback`, `commoncrawl`, `virustotal`. Default: `wayback,commoncrawl,virustotal`.
+*   `-output <file_path>`: Specify an output file path. If not provided, output goes to stdout.
+*   `-concurrency <number>`: Set the number of concurrent requests to archive sources. Default: `5`.
+*   `-timeout <seconds>`: Set the HTTP request timeout in seconds. Default: `10`.
+
+## Install
+
+To install the tool from the current directory:
+
+```bash
+▶ go install .
 ```
 
-Install:
+This will install the `waybackurls` executable to your `GOPATH/bin` directory.
 
+Alternatively, you can build the executable:
+
+```bash
+▶ go build -o waybackurls
 ```
-▶ go install github.com/tomnomnom/waybackurls@latest
+
+Then run it:
+
+```bash
+▶ ./waybackurls
+```
+
+If you are installing from a specific repository path (e.g., your fork):
+
+```bash
+▶ go install github.com/0x1Jar/waybackurls-v1@latest
 ```
 
 ## Credit
