@@ -27,7 +27,37 @@ func main() {
 	var getVersionsFlag bool
 	flag.BoolVar(&getVersionsFlag, "get-versions", false, "list URLs for crawled versions of input URL(s)")
 
+	var sourcesFlag string
+	flag.StringVar(&sourcesFlag, "sources", "wayback,commoncrawl,virustotal", "comma-separated list of sources to query: wayback, commoncrawl, virustotal")
+
+	var outputFilePath string
+	flag.StringVar(&outputFilePath, "output", "", "output file path (default: stdout)")
+
+	var concurrency int
+	flag.IntVar(&concurrency, "concurrency", 5, "number of concurrent requests")
+
+	var timeout int
+	flag.IntVar(&timeout, "timeout", 10, "HTTP request timeout in seconds")
+
 	flag.Parse()
+
+	var outputFile *os.File
+	if outputFilePath != "" {
+		var err error
+		outputFile, err = os.Create(outputFilePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to create output file: %s\n", err)
+			os.Exit(1)
+		}
+		defer outputFile.Close()
+	} else {
+		outputFile = os.Stdout
+	}
+
+	// Initialize the global HTTP client with a timeout
+	httpClient = &http.Client{
+		Timeout: time.Duration(timeout) * time.Second,
+	}
 
 	if flag.NArg() > 0 {
 		// fetch for a single domain
@@ -53,29 +83,48 @@ func main() {
 			if err != nil {
 				continue
 			}
-			fmt.Println(strings.Join(versions, "\n"))
+			fmt.Fprintln(outputFile, strings.Join(versions, "\n"))
 		}
 
 		return
 	}
 
-	fetchFns := []fetchFn{
-		getWaybackURLs,
-		getCommonCrawlURLs,
-		getVirusTotalURLs,
+	// Determine which sources to use
+	sources := make(map[string]bool)
+	for _, s := range strings.Split(sourcesFlag, ",") {
+		sources[strings.TrimSpace(s)] = true
+	}
+
+	var fetchFns []fetchFn
+	if sources["wayback"] {
+		fetchFns = append(fetchFns, getWaybackURLs)
+	}
+	if sources["commoncrawl"] {
+		fetchFns = append(fetchFns, getCommonCrawlURLs)
+	}
+	if sources["virustotal"] {
+		fetchFns = append(fetchFns, getVirusTotalURLs)
+	}
+
+	if len(fetchFns) == 0 {
+		fmt.Fprintf(os.Stderr, "no valid sources specified. Please choose from: wayback, commoncrawl, virustotal\n")
+		os.Exit(1)
 	}
 
 	for _, domain := range domains {
 
 		var wg sync.WaitGroup
 		wurls := make(chan wurl)
+		limiter := make(chan struct{}, concurrency) // Concurrency limiter
 
 		for _, fn := range fetchFns {
 			wg.Add(1)
 			fetch := fn
 			go func() {
 				defer wg.Done()
+				limiter <- struct{}{} // Acquire a token
 				resp, err := fetch(domain, noSubs)
+				<-limiter // Release the token
 				if err != nil {
 					return
 				}
@@ -107,10 +156,10 @@ func main() {
 					fmt.Fprintf(os.Stderr, "failed to parse date [%s] for URL [%s]\n", w.date, w.url)
 				}
 
-				fmt.Printf("%s %s\n", d.Format(time.RFC3339), w.url)
+				fmt.Fprintf(outputFile, "%s %s\n", d.Format(time.RFC3339), w.url)
 
 			} else {
-				fmt.Println(w.url)
+				fmt.Fprintln(outputFile, w.url)
 			}
 		}
 	}
@@ -130,7 +179,8 @@ func getWaybackURLs(domain string, noSubs bool) ([]wurl, error) {
 		subsWildcard = ""
 	}
 
-	res, err := http.Get(
+	// Use the global httpClient
+	res, err := httpClient.Get(
 		fmt.Sprintf("http://web.archive.org/cdx/search/cdx?url=%s%s/*&output=json&collapse=urlkey", subsWildcard, domain),
 	)
 	if err != nil {
@@ -170,7 +220,8 @@ func getCommonCrawlURLs(domain string, noSubs bool) ([]wurl, error) {
 		subsWildcard = ""
 	}
 
-	res, err := http.Get(
+	// Use the global httpClient
+	res, err := httpClient.Get(
 		fmt.Sprintf("http://index.commoncrawl.org/CC-MAIN-2018-22-index?url=%s%s/*&output=json", subsWildcard, domain),
 	)
 	if err != nil {
@@ -201,6 +252,9 @@ func getCommonCrawlURLs(domain string, noSubs bool) ([]wurl, error) {
 
 }
 
+// Declare httpClient globally
+var httpClient *http.Client
+
 func getVirusTotalURLs(domain string, noSubs bool) ([]wurl, error) {
 	out := make([]wurl, 0)
 
@@ -217,7 +271,8 @@ func getVirusTotalURLs(domain string, noSubs bool) ([]wurl, error) {
 		domain,
 	)
 
-	resp, err := http.Get(fetchURL)
+	// Use the global httpClient
+	resp, err := httpClient.Get(fetchURL)
 	if err != nil {
 		return out, err
 	}
@@ -257,7 +312,8 @@ func isSubdomain(rawUrl, domain string) bool {
 func getVersions(u string) ([]string, error) {
 	out := make([]string, 0)
 
-	resp, err := http.Get(fmt.Sprintf(
+	// Use the global httpClient
+	resp, err := httpClient.Get(fmt.Sprintf(
 		"http://web.archive.org/cdx/search/cdx?url=%s&output=json", u,
 	))
 
